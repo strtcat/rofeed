@@ -1,5 +1,6 @@
 /* =============================================================================
    rofeed.rasi — Rofi theme
+   Version: 0.4.0
    =============================================================================
    Palette: Catppuccin Mocha
      Base       #11111b    Mantle     #181825    Crust      #1e1e2e
@@ -15,7 +16,6 @@
     background-color: transparent;
     text-color:       #cdd6f4;
 
-    /* Shared colour tokens — change once, applies everywhere */
     clr-base:     #11111b;
     clr-mantle:   #181825;
     clr-crust:    #1e1e2e;
@@ -72,11 +72,11 @@ entry {
     placeholder-color: @clr-overlay0;
 }
 
-/* ── Message bar (shows status + current settings summary) ───────────────── */
+/* ── Message bar ─────────────────────────────────────────────────────────── */
 message {
     background-color: @clr-crust;
     border-radius:    6px;
-    padding:          5px 14px;
+    padding:          4px 14px;
     border:           1px;
 }
 
@@ -90,9 +90,17 @@ textbox {
 listview {
     background-color: transparent;
     columns:          1;
-    lines:            4;        /* one more row vs original for better density */
+    /*
+     * lines: how many rows are visible at once.
+     * Feed view rows are tall (thumbnail 160px + 3 text lines).
+     * Settings rows are compact (single text line ~20px).
+     * We set this high enough that settings is fully visible without scrolling
+     * on common screen sizes; feed naturally shows 3–4 videos.
+     * Adjust if your screen is smaller.
+     */
+    lines:            14;
     scrollbar:        true;
-    spacing:          5px;
+    spacing:          4px;
     fixed-height:     true;
     dynamic:          false;
 }
@@ -106,12 +114,19 @@ scrollbar {
     width:            6px;
 }
 
-/* ── List element (one video / one settings row) ─────────────────────────── */
+/* ── List element ────────────────────────────────────────────────────────── */
+/*
+ * Feed entries use element-icon (160px thumbnail) + element-text (3 lines).
+ * Settings entries have no icon, so element-icon collapses to 0×0 and the
+ * row shrinks to the height of a single text line — no extra work needed.
+ * The padding below is the only shared value; it is tight enough for settings
+ * rows while still feeling comfortable for feed rows.
+ */
 element {
     background-color: transparent;
-    border-radius:    8px;
-    padding:          10px 10px;
-    spacing:          16px;
+    border-radius:    6px;
+    padding:          6px 8px;
+    spacing:          14px;
     orientation:      horizontal;
     children:         [ element-icon, element-text ];
 }
@@ -124,20 +139,18 @@ element normal active {
     background-color: transparent;
 }
 
-/* Highlight selected row with a distinct surface colour and a left accent bar.
-   The left border gives a clear "cursor" cue without being gaudy. */
 element selected normal {
     background-color: @clr-surface0;
     border:           0px 0px 0px 3px;
     border-color:     @clr-sky;
-    border-radius:    0px 8px 8px 0px;
+    border-radius:    0px 6px 6px 0px;
 }
 
 element selected active {
     background-color: @clr-surface0;
     border:           0px 0px 0px 3px;
     border-color:     @clr-mauve;
-    border-radius:    0px 8px 8px 0px;
+    border-radius:    0px 6px 6px 0px;
 }
 
 element alternate normal {
@@ -145,9 +158,11 @@ element alternate normal {
 }
 
 /* ── Thumbnail icon ──────────────────────────────────────────────────────── */
-/* When an entry has no icon (settings rows), the widget collapses to 0×0
-   because rofi only allocates space for icons that are actually present.
-   The 16px thumbnail entries and text-only settings rows coexist cleanly. */
+/*
+ * Feed rows: rofi allocates 160×90px for the thumbnail.
+ * Settings rows: no icon is set, so this widget gets size 0×0 and the text
+ * fills the full row width automatically.
+ */
 element-icon {
     size:             160px;
     border-radius:    6px;
@@ -159,7 +174,7 @@ element-icon {
 element-text {
     background-color: transparent;
     text-color:       @clr-text;
-    vertical-align:   0.3;
+    vertical-align:   0.5;
     markup:           true;
     font:             "JetBrainsMono Nerd Font Medium 11";
     cursor:           inherit;
