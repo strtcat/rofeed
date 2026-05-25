@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # rofeed-worker.sh — Mi Feed · rofi-blocks worker
-# Version: 0.4.0
+# Version: 0.5.0
 # =============================================================================
 #
 # rofi-blocks protocol:
@@ -28,7 +28,7 @@
 # § 1  PATHS & CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-readonly ROFEED_VERSION="0.4.0"
+readonly ROFEED_VERSION="0.5.0"
 
 readonly CONFIG_DIR="${HOME}/.config/rofeed"
 readonly SUBS="${CONFIG_DIR}/subscriptions"
@@ -472,14 +472,9 @@ PYEOF
 
         rm -f "$rssfile" "$new_ids_file" "$durfile"
 
-        # ── Emit incremental feed update ──────────────────────────────────────
-        local tmpmerge total_vids lines_json
-        tmpmerge=$(mktemp /tmp/rofeed-merge-XXXX.tsv)
-        merge_tsv "$tmpnew" "$CACHE_FILE" > "$tmpmerge"
-        total_vids=$(wc -l < "$tmpmerge")
-        lines_json=$(build_feed_json "$tmpmerge")
-        emit_if_feed "" "$lines_json"
-        rm -f "$tmpmerge"
+        # NOTE: no stdout emit here — the event loop's read -t polling handles
+        # all live UI updates by reading CRAWLER_STATUS_FILE from the main process.
+        # Emitting from this background subshell would race with the event loop.
 
     done < "$SUBS"
 
@@ -497,10 +492,7 @@ PYEOF
     local total_vids
     total_vids=$(wc -l < "$CACHE_FILE")
     crawler_status_write "done:${total_vids}"
-
-    local lines_json
-    lines_json=$(build_feed_json "$CACHE_FILE")
-    emit_if_feed "" "$lines_json"
+    # Final UI refresh is driven by the event loop's read -t poll.
 
     flock -u 9
 }
@@ -797,6 +789,13 @@ launch_mpv() {
 #   __toggle_subs__   → subtitles on/off
 #   __noop__          → re-emit current view (separator rows)
 #   [A-Za-z0-9_-]{11} → launch mpv
+#
+# Live-update mechanism:
+#   read -t 2 times out every 2 seconds when rofi sends no event.
+#   On timeout, if a crawl is in progress the main process reads
+#   CRAWLER_STATUS_FILE and pushes a fresh JSON update to rofi.
+#   This is the ONLY place that writes to stdout while crawling —
+#   the crawler subshell never touches stdout, avoiding interleaving.
 # ─────────────────────────────────────────────────────────────────────────────
 
 save_interval() {
@@ -891,8 +890,32 @@ handle_event() {
 }
 
 run_event_loop() {
-    while IFS= read -r event; do
-        [[ -n "$event" ]] && handle_event "$event"
+    local event ret
+    while true; do
+        # read -t 2: block up to 2 s for a rofi event.
+        # ret > 128  → timed out (no event); continue to poll.
+        # ret == 0   → got an event; handle it.
+        # ret 1..128 → EOF (rofi closed); exit.
+        IFS= read -r -t 2 event; ret=$?
+        if (( ret == 0 )); then
+            [[ -n "$event" ]] && handle_event "$event"
+        elif (( ret > 128 )); then
+            # Timeout — push a live status update when a crawl is running.
+            # Only the main process writes to stdout (no subshell races).
+            local cur_status cur_mode
+            cur_status=$(cat "$CRAWLER_STATUS_FILE" 2>/dev/null || printf 'idle')
+            cur_mode=$(cat "$VIEWMODE_FILE" 2>/dev/null || printf 'feed')
+            if [[ "$cur_status" == running:* && "$cur_mode" == "feed" ]]; then
+                emit_feed "" "$(build_feed_json "${CACHE_FILE:-/dev/null}")"
+            elif [[ "$cur_status" == done:* && "$cur_mode" == "feed" ]]; then
+                # Crawl just finished — emit one final refresh then clear.
+                emit_feed "" "$(build_feed_json "$CACHE_FILE")"
+                crawler_status_write 'idle'
+            fi
+        else
+            # EOF: rofi has closed; exit cleanly.
+            break
+        fi
     done
 }
 
