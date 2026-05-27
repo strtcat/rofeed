@@ -1,286 +1,288 @@
-# rofeed — YouTube Subscription Feed in Rofi
+# Mi Feed — YouTube Subscription Browser
 
-A lightweight, keyboard-driven YouTube subscription feed browser for Linux.
-Fetches your channels' RSS feeds, caches them locally, and lets you browse
-and play videos via mpv — all inside a Rofi pop-up.
+A fast, keyboard-driven YouTube subscription feed for the Linux desktop.
+Uses `rofi-blocks` as the UI, `yt-dlp` + YouTube RSS for data, and `mpv` for playback.
+The local cache is the primary source of truth; background scraping is always non-blocking.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ 🎬 Mi Feed                         Buscar...                 │
-│ 🎬 480p  CC:off                                              │
-├──────────────────────────────────────────────────────────────┤
-│ ✅  312 vídeos en caché  ·  actualizado hace 3 min           │
-│ ⚙  Ajustes   modo · resolución · subtítulos · intervalo      │
-│ ┌──────────┐  2025-01-20 14:32   8m 42s                      │
-│ │ thumbnail│  My favourite video title                        │
-│ └──────────┘  — Channel Name                                 │
-│  ...                                                          │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ 🎬 Mi Feed          🎬 480p  CC:off                              │
+├─────────────────────────────────────────────────────────────────┤
+│  ⏺  312 vídeos en caché  ·  actualizado hace 12 min             │  ← status row
+│  ⚙  Ajustes   modo · resolución · subtítulos                    │  ← compact row
+├──────────────┬──────────────────────────────────────────────────┤
+│  [thumbnail] │ 2025-07-10  12m 34s                              │  ┐
+│              │ Video title truncated to ~58 chars               │  │ video row
+│              │ — Channel Name                                   │  ┘
+├──────────────┼──────────────────────────────────────────────────┤
+│  [thumbnail] │ …                                                │  (×4 on screen)
+└──────────────┴──────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Features
+## Architecture — strict UI / Worker separation
 
-- Browse YouTube subscriptions in a fast Rofi interface with thumbnail previews
-- Play in **video mode** (with resolution selector: 360p / 480p / 720p / 1080p) or **audio-only** mode
-- Optional **subtitle** support (auto-subs, es/en priority)
-- **Incremental cache**: only fetches new videos on each update — polite rate-limiting with `sleep 0.4` between yt-dlp calls
-- **Live crawl progress**: the status bar updates every ~2 seconds while a crawl runs (`🔄 Actualizando… canal 3/12`)
-- Background updates via **systemd user timer** (headless, every 30 min by default)
-- Per-channel video cap and optional **date range filter** (configurable in `~/.config/rofeed/config`)
-- Settings panel accessible from inside the UI (⚙ row)
-- Notifications via `notify-send` when playback starts
+```
+rofeed-launch.sh          (thin launcher — keybind / systemd target)
+  │
+  ├─(--update)──────────► rofeed-worker.sh --crawl-only
+  │                            Fetches RSS, yt-dlp durations, thumbnails.
+  │                            Writes to filesystem only.  No UI output.
+  │
+  └─(default)──► rofi -blocks-wrap rofeed.sh
+                      │
+                      │  reads                     writes
+                      ├──────────────────────────────────────────────────────┐
+                      │  ~/.cache/rofeed-feed/videos.tsv       (read-only)   │
+                      │  ~/.cache/rofeed-feed/.crawler_status  (read-only)   │
+                      │  ~/.cache/rofeed-feed/.last_update     (read-only)   │
+                      │  ~/.cache/rofeed-thumbs/<id>.jpg       (read-only)   │
+                      │                                                       │
+                      │  ~/.cache/rofeed-feed/settings         (read/write)  │
+                      │  ~/.cache/rofeed-feed/.viewmode        (write only)  │
+                      └──────────────────────────────────────────────────────┘
+                      │
+                      │  spawns (on "Force Update")
+                      └──────────────────────────► rofeed-worker.sh --crawl-only
+                                                       (detached background process)
+```
+
+**Key invariant:** `rofeed.sh` never makes network calls and never writes to
+`videos.tsv`, `channel-ids`, or thumbnails.  `rofeed-worker.sh` never writes
+to stdout (its stdout is redirected to `/dev/null`).
 
 ---
 
 ## Dependencies
 
-| Tool | Required | Notes |
-|---|---|---|
-| `rofi` + `rofi-blocks` plugin | **yes** | AUR: `rofi-blocks-git` |
-| `mpv` | **yes** | playback |
-| `yt-dlp` | **yes** | duration fetch + mpv format string |
-| `curl` | **yes** | RSS + thumbnail downloads |
-| `python3` | **yes** | XML parsing, JSON building, cache ops |
-| `flock` | **yes** | prevents concurrent crawls (`util-linux`) |
-| `notify-send` | optional | playback notifications |
+| Package            | Arch package              | Purpose                        |
+|--------------------|---------------------------|--------------------------------|
+| rofi-blocks-git    | AUR: `rofi-blocks-git`    | rofi plugin — streaming UI     |
+| yt-dlp             | `yt-dlp`                  | Duration fetching, playback    |
+| mpv                | `mpv`                     | Video/audio player             |
+| curl               | `curl`                    | RSS + thumbnail downloads      |
+| python3            | `python` (stdlib only)    | XML parsing, JSON building     |
+| libnotify          | `libnotify`               | `notify-send` desktop toasts   |
+| util-linux         | `util-linux`              | `flock` (crawl lock)           |
+
+```bash
+# Install all at once (Arch + AUR helper like paru or yay):
+paru -S rofi-blocks-git yt-dlp mpv curl python libnotify util-linux
+```
 
 ---
 
 ## Installation
 
-### Manual (recommended for personal use)
-
 ```bash
-# 1. Create install directory
-mkdir -p ~/.local/bin/rofeed
+# 1. Choose an install location
+INSTALL_DIR="${HOME}/.local/bin/rofeed"
+mkdir -p "$INSTALL_DIR"
 
-# 2. Copy the two scripts
-cp rofeed.sh     ~/.local/bin/rofeed/
-cp rofeed-worker.sh ~/.local/bin/rofeed/
+# 2. Copy scripts
+cp rofeed-launch.sh   "$INSTALL_DIR/"
+cp rofeed.sh          "$INSTALL_DIR/"
+cp rofeed-worker.sh   "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/"*.sh
 
-# 3. Make them executable
-chmod +x ~/.local/bin/rofeed/rofeed.sh ~/.local/bin/rofeed/rofeed-worker.sh
+# 3. Copy Rofi theme
+cp rofeed.rasi "${HOME}/.config/rofi/rofeed.rasi"
 
-# 4. Install the Rofi theme
-mkdir -p ~/.config/rofi
-cp rofeed.rasi ~/.config/rofi/
-
-# 5. (Optional) Add to PATH
-echo 'export PATH="$HOME/.local/bin/rofeed:$PATH"' >> ~/.bashrc
-```
-
-### System-wide (Pacman / AUR packaging)
-
-The launcher looks for files in these fallback locations automatically:
-
-| File | Path |
-|---|---|
-| `rofeed-worker.sh` | `/usr/lib/rofeed/rofeed-worker.sh` |
-| `rofeed.rasi` | `/usr/share/rofeed/rofeed.rasi` |
-| Launcher | `/usr/bin/rofeed` |
-
----
-
-## Quick Start
-
-```bash
-# First run — opens the UI (empty cache)
-rofeed.sh
-
-# Add subscriptions (one URL per line, # lines are comments)
-nano ~/.config/rofeed/subscriptions
-
-# Force an immediate cache update from the UI:
-#   → open rofeed, click the status bar row or ⚙ Ajustes → Forzar actualización
-
-# Or update headlessly from the terminal:
-rofeed.sh --update
-```
-
----
-
-## Subscriptions file
-
-`~/.config/rofeed/subscriptions` — one channel URL per line.
-
-```
-# My subscriptions
-https://www.youtube.com/@LinusTechTips
-https://www.youtube.com/channel/UCVls1GmFKf6WlTraIb_IaJg
-https://www.youtube.com/@3blue1brown
-# https://www.youtube.com/@paused  ← commented out
-```
-
-Supported URL formats:
-- `https://www.youtube.com/@handle`
-- `https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxx` (channel ID resolved from URL and cached)
-- Any URL whose page contains `"externalId":"UCxxx"` in the HTML
-
----
-
-## Configuration
-
-`~/.config/rofeed/config` is written on first run with defaults. Edit it to
-customise behaviour; changes take effect next time rofeed opens or `--update` runs.
-
-```bash
-# Minutes between background refresh cycles (systemd timer interval).
-# Set to 0 to always refresh when opening the UI.
-# Minimum recommended: 5 (YouTube throttles RSS feeds server-side).
-UPDATE_INTERVAL_MIN="30"
-
-# Maximum videos to keep per channel. 0 = unlimited.
-MAX_VIDEOS_PER_CHANNEL="30"
-
-# Only show videos within this date range. Leave blank to disable.
-# Format: YYYY-MM-DD
-DATE_FROM=""
-DATE_TO=""
-```
-
-Playback settings (mode, resolution, subtitles) are managed by the in-app ⚙ panel
-and saved to `~/.cache/rofeed-feed/settings`.
-
----
-
-## Systemd user timer (background updates)
-
-Install the timer so the cache is always fresh when you open the UI:
-
-```bash
-# Create the service unit
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/rofeed-update.service << 'EOF'
-[Unit]
-Description=Mi Feed — background cache update
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/rofeed/rofeed.sh --update
+# 4. Add subscriptions (one URL per line, # for comments)
+mkdir -p "${HOME}/.config/rofeed"
+cat >> "${HOME}/.config/rofeed/subscriptions" << 'EOF'
+# Paste your YouTube channel URLs here:
+https://www.youtube.com/@SomeChannel
+https://www.youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxxxx
 EOF
 
-# Create the timer unit (runs every 30 min, persistent across sleep/reboot)
-cat > ~/.config/systemd/user/rofeed-update.timer << 'EOF'
-[Unit]
-Description=Mi Feed — run crawler every 30 min
+# 5. Run a first cache update (headless)
+"$INSTALL_DIR/rofeed-launch.sh" --update
 
-[Timer]
-OnCalendar=*:0/30
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-# Enable and start
-systemctl --user daemon-reload
-systemctl --user enable --now rofeed-update.timer
-
-# Check status
-systemctl --user status rofeed-update.timer
+# 6. Open the feed
+"$INSTALL_DIR/rofeed-launch.sh"
 ```
-
-> **Note:** When the timer runs, the crawler writes its status to
-> `~/.cache/rofeed-feed/.crawler_status`. If the UI is open at the same time,
-> the live status bar updates automatically (polled every ~2 s).
 
 ---
 
 ## File layout
 
 ```
+~/.local/bin/rofeed/
+  rofeed-launch.sh     ← Launcher (bind to keybind / add to app menu)
+  rofeed.sh            ← rofi-blocks UI worker (invoked automatically by rofi)
+  rofeed-worker.sh     ← Background crawler (invoked by --update / Force Update)
+
+~/.config/rofi/
+  rofeed.rasi          ← Rofi theme (Catppuccin Mocha, dual row heights)
+
 ~/.config/rofeed/
-├── config              Main configuration
-└── subscriptions       Channel URLs (one per line)
+  subscriptions        ← One YouTube channel URL per line
+  config               ← MAX_VIDEOS_PER_CHANNEL, DATE_FROM, DATE_TO
 
 ~/.cache/rofeed-feed/
-├── videos.tsv          Main video cache (tab-separated: id, title, channel, date, duration)
-├── settings            Playback settings (managed by UI)
-├── .last_update        Unix timestamp of last successful crawl
-├── .crawler_status     Real-time crawler state (read by UI polling loop)
-├── .crawl.lock         flock file — prevents concurrent crawlers
-└── .viewmode           Current UI view: "feed" or "settings"
+  videos.tsv           ← Video cache (vid_id, title, channel, date, duration)
+  settings             ← Playback settings: PLAY_MODE, RESOLUTION, SUBTITLES
+  .crawler_status      ← Live crawl status (read by UI, written by worker)
+  .last_update         ← Unix timestamp of last successful crawl
+  .crawl.log           ← Rolling crawl log (last 500 lines kept)
+  .viewmode            ← Runtime flag: "feed" | "settings" (UI-owned)
 
 ~/.cache/rofeed-channel-ids/
-└── <md5>.txt           Resolved UCxxxxxx IDs (one file per channel URL, cached forever)
+  <md5hash>            ← Cached UCxxx ID per URL (avoids repeated lookups)
 
 ~/.cache/rofeed-thumbs/
-└── <vid_id>.jpg        mqdefault thumbnails (downloaded in parallel on first display)
+  <vid_id>.jpg         ← Cached mqdefault thumbnails
 ```
 
 ---
 
 ## Usage
 
-```
-rofeed.sh               Open the interactive feed browser
-rofeed.sh --update      Headless cache crawl only (for systemd / cron)
-rofeed.sh --version     Print version and exit
-rofeed.sh --help        Show help
-```
+### Keyboard shortcuts inside rofi
+| Key               | Action                                  |
+|-------------------|-----------------------------------------|
+| `↑` / `↓`        | Navigate videos / settings options      |
+| `Enter`           | Play selected video  OR  apply setting  |
+| Type to search    | Filter the visible list                 |
+| `Esc`             | Close Mi Feed                           |
 
-### Inside the UI
+### Settings menu
+Select the **⚙ Ajustes** row at the top of the feed.
 
-| Action | Result |
-|---|---|
-| **Enter** on a video | Launch mpv |
-| **Enter** on the status bar row | Force cache update |
-| **Enter** on ⚙ Ajustes | Open settings panel |
-| Type in the search bar | Filter videos by title / channel |
-| **Esc** | Close |
+| Setting    | Options                            | Default  |
+|------------|------------------------------------|----------|
+| Play mode  | 🎬 Video + Audio / 🎵 Audio Only   | Video    |
+| Resolution | 360p / 480p / 720p / 1080p         | 480p     |
+| Subtitles  | ON / OFF                           | OFF      |
 
-### Settings panel
-
-| Option | Values |
-|---|---|
-| Mode | 🎬 Video + Audio / 🎵 Audio Only |
-| Subtitles | ON / OFF |
-| Resolution | 360p / 480p / 720p / 1080p |
-| Update interval | Always / 5 min / 10 min / 15 min / 30 min / 1 h / 3 h |
-| Forzar actualización | Starts an immediate crawl |
+Settings are applied to the **next** video you play and are persisted to disk.
 
 ---
 
-## How the live crawl progress works
+## Background cache update (headless)
 
-When you trigger "Forzar actualización":
+```bash
+# Run a one-shot update without opening rofi:
+rofeed-launch.sh --update
 
-1. The main process writes `running:0:?` to `.crawler_status` and immediately renders the feed (showing `🔄 Actualizando… canal 0/?`).
-2. A background subshell starts `run_crawler`. As it processes each channel it updates `.crawler_status` → `running:1:12`, `running:2:12`, etc.
-3. The event loop uses `read -t 2` — it wakes up every 2 seconds even when rofi sends no events. On each timeout it reads `.crawler_status` and, if a crawl is running, pushes a fresh JSON update to rofi (updating the status bar in real time).
-4. Only the **main process** writes to stdout. The crawler subshell never touches stdout, eliminating any race conditions.
-5. When the crawl finishes (status becomes `done:N`), the next poll emits the final feed and resets the status to `idle`.
+# Watch the live log:
+tail -f ~/.cache/rofeed-feed/.crawl.log
+```
+
+### Systemd user timer (recommended)
+
+```ini
+# ~/.config/systemd/user/rofeed-update.service
+[Unit]
+Description=rofeed — background cache update
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/rofeed/rofeed-worker.sh --crawl-only
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1800
+```
+
+```ini
+# ~/.config/systemd/user/rofeed-update.timer
+[Unit]
+Description=rofeed — run crawler every 30 min
+Requires=rofeed-update.service
+
+[Timer]
+OnCalendar=*:0/30
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now rofeed-update.timer
+```
+
+---
+
+## Row height in rofi — how it works
+
+The theme (`rofeed.rasi`) uses a single `element` style for all rows.
+Two different heights emerge naturally from whether a row carries an icon:
+
+- **Video rows** include `"icon": "/path/to/thumb.jpg"` in their JSON.
+  The `element-icon` widget renders at `@icon-size` (default 100 px) and
+  the row expands to fit, plus `@element-pad-v` (10 px) top and bottom.
+  Total ≈ **120 px** per video row → 4 rows comfortably fill a 1080p window.
+
+- **Status / Settings / Section rows** have no `"icon"` field.
+  rofi collapses the icon widget to zero size and the row takes its natural
+  text height (≈ 28–32 px for a single line with `@compact-pad-v = 5 px`).
+
+To fit more or fewer video rows, adjust `@icon-size` in `rofeed.rasi`.
+Each 10 px reduction in icon-size gains roughly half a visible row.
+
+---
+
+## Rofi theme colours (Catppuccin Mocha)
+
+| Token          | Hex       | Used for                              |
+|----------------|-----------|---------------------------------------|
+| `clr-base`     | `#11111b` | Window background                     |
+| `clr-crust`    | `#1e1e2e` | Inputbar, message bar                 |
+| `clr-surface0` | `#313244` | Selected element background           |
+| `clr-sky`      | `#89dceb` | Prompt, dates, settings accent        |
+| `clr-green`    | `#a6e3a1` | Durations, active resolution          |
+| `clr-mauve`    | `#cba6f7` | Active selection border               |
+| `clr-red`      | `#f38ba8` | "Back to feed" button                 |
+| `clr-text`     | `#cdd6f4` | Titles, general text                  |
+| `clr-overlay0` | `#6c7086` | Channel names, hints                  |
+| `clr-peach`    | `#fab387` | Status bar while crawling, Force Upd. |
+
+---
+
+## Subscriptions file
+
+```bash
+# ~/.config/rofeed/subscriptions
+
+# /channel/UCxxx URLs skip the ID-resolution HTTP request:
+https://www.youtube.com/channel/UCSJ4gkVC6NrvII8umztf0Ow
+
+# Handle (@) URLs are resolved once and cached by URL md5 hash:
+https://www.youtube.com/@SomeChannel
+
+# Comment lines and blank lines are ignored.
+```
 
 ---
 
 ## Troubleshooting
 
-**No videos appear after `--update`**
-- Check `~/.config/rofeed/subscriptions` exists and has non-commented URLs.
-- Run `rofeed.sh --update` in a terminal and look for errors.
+**Rofi opens but shows nothing:**
+Make sure `rofi-blocks-git` (not plain `rofi`) is installed and the `-modi blocks`
+flag is supported.
 
-**"rofi-blocks not found" / rofi opens without the feed**
-- Install `rofi-blocks-git` from the AUR: `paru -S rofi-blocks-git`
+**Empty cache after first run:**
+Check `~/.cache/rofeed-feed/.crawl.log` for error details.  Common causes:
+- No subscriptions file at `~/.config/rofeed/subscriptions`
+- Network error fetching RSS (try `curl https://www.youtube.com/feeds/videos.xml?channel_id=UC…`)
+- `yt-dlp` blocked or outdated (run `yt-dlp -U`)
 
-**Thumbnails don't load**
-- Requires `curl` to be in PATH and network access to `i.ytimg.com`.
-- Thumbnails are cached in `~/.cache/rofeed-thumbs/` on first display.
+**Thumbnails don't appear:**
+`curl` must reach `i.ytimg.com`.  Thumbnails are downloaded during the crawl
+and cached in `~/.cache/rofeed-thumbs/`.
 
-**Crawl takes a long time**
-- Duration fetching uses `yt-dlp` per new video with a 0.4 s delay between calls (to be polite to YouTube). This is intentional.
-- Only *new* videos (not already in cache) require a yt-dlp call.
+**Durations always show `?`:**
+`yt-dlp` may be rate-limited.  RSS data (title, date, channel) still works.
+Run `yt-dlp --version` to verify the installation.
 
-**`rofeed-worker.sh not found`**
-- Make sure both scripts are in the same directory, or that `rofeed-worker.sh` exists at `/usr/lib/rofeed/rofeed-worker.sh`.
+**Settings not persisting:**
+Settings live at `~/.cache/rofeed-feed/settings`.  Verify the directory is writable.
 
----
-
-## Version history
-
-| Version | Changes |
-|---|---|
-| 0.5.0 | Fix live crawl progress: `read -t 2` polling loop replaces blocking stdin read; crawler subshell no longer writes to stdout (eliminates race condition) |
-| 0.4.0 | Incremental cache (only new videos fetched); settings panel; date filter; systemd timer |
-| 0.3.0 | Initial public release |
+**"Force Update" button does nothing:**
+`rofeed-worker.sh` must be in the same directory as `rofeed.sh` or at
+`/usr/lib/rofeed/rofeed-worker.sh`.

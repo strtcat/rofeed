@@ -1,0 +1,43 @@
+# ~/.config/systemd/user/rofeed-update.timer
+# =============================================================================
+# rofeed — automatic crawl timer
+# Triggers rofeed-update.service at the configured interval.
+# Persistent=true means missed runs (while machine was off / suspended) are
+# caught up immediately on next boot/wake — you won't miss videos.
+# =============================================================================
+#
+# Installation:
+#   cp rofeed-update.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now rofeed-update.timer
+#
+# Check status:
+#   systemctl --user status rofeed-update.timer
+#   systemctl --user list-timers --user
+#
+# Disable:
+#   systemctl --user disable --now rofeed-update.timer
+
+[Unit]
+Description=rofeed — run cache update periodically
+Requires=rofeed-update.service
+
+[Timer]
+# ── Choose your preferred interval ───────────────────────────────────────────
+# Every 30 minutes (default, recommended):
+OnCalendar=*:0/30
+# Every hour:
+# OnCalendar=hourly
+# Every 15 minutes (only sensible for very active channels):
+# OnCalendar=*:0/15
+# Once a day at 07:00:
+# OnCalendar=07:00
+
+# Catch up on missed runs after suspend/reboot
+Persistent=true
+
+# Randomise start within ±2 min to avoid thundering-herd on shared networks
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

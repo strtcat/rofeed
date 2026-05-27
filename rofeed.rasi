@@ -1,181 +1,227 @@
 /* =============================================================================
-   rofeed.rasi — Rofi theme
-   Version: 0.4.0
-   =============================================================================
-   Palette: Catppuccin Mocha
-     Base       #11111b    Mantle     #181825    Crust      #1e1e2e
-     Surface0   #313244    Surface1   #45475a    Overlay0   #6c7086
-     Subtext0   #a6adc8    Text       #cdd6f4
-     Sky        #89dceb    Green      #a6e3a1    Mauve      #cba6f7
-     Red        #f38ba8    Peach      #fab387    Yellow     #f9e2af
-   ============================================================================= */
+ * rofeed.rasi — Mi Feed · Rofi theme
+ * Palette: Catppuccin Mocha
+ * =============================================================================
+ *
+ * ROW HEIGHT STRATEGY
+ * ───────────────────
+ * rofi-blocks passes an optional "icon" field per row.  When "icon" is
+ * present, rofi renders element-icon at the configured icon-size and the
+ * row expands to fit it.  When "icon" is absent, the icon widget collapses
+ * to zero height and the row shrinks to the text height only.
+ *
+ * We exploit this to get two distinct heights from a single element style:
+ *
+ * Video rows    → have "icon" (thumbnail path)
+ * → element height ≈ icon-size + vertical padding
+ * → target: 4 rows visible on a 1080p screen
+ *
+ * Status / Settings / Section-header rows → NO "icon"
+ * → element height ≈ line-height × lines + vertical padding
+ * → naturally compact (~28–32 px)
+ *
+ * Tuning for 4 video rows:
+ * window height  ≈ 900px (adjust WINDOW_HEIGHT below if needed)
+ * inputbar       ≈  46px
+ * message bar    ≈  28px
+ * scrollbar      ≈   0px (hidden)
+ * listview pad   ≈   8px top + 8px bottom
+ * spacing        ≈   4px between rows
+ * 4 video rows   × element-height each
+ *
+ * element-height  = icon-size + 2 × element-padding-vertical
+ * = 100px + 2 × 10px = 120px
+ * 4 × 120px + 3 × 4px (spacing) + 16px (listview pad) + 74px (chrome)
+ * = 480 + 12 + 16 + 74 = 582px    ← well within 900px window
+ *
+ * Adjust icon-size and element-pad-v to taste.
+ * ============================================================================= */
 
-/* ── Global defaults ─────────────────────────────────────────────────────── */
+/* ── Catppuccin Mocha palette ─────────────────────────────────────────────── */
 * {
-    font:             "JetBrainsMono Nerd Font Medium 11";
+    clr-base:      #11111b;
+    clr-mantle:    #181825;
+    clr-crust:     #1e1e2e;
+    clr-surface0:  #313244;
+    clr-surface1:  #45475a;
+    clr-overlay0:  #6c7086;
+    clr-text:      #cdd6f4;
+    clr-subtext0:  #a6adc8;
+    clr-sky:       #89dceb;
+    clr-green:     #a6e3a1;
+    clr-mauve:     #cba6f7;
+    clr-red:       #f38ba8;
+    clr-peach:     #fab387;
+
+    /* Semantic aliases */
+    bg:            @clr-base;
+    bg-alt:        @clr-crust;
+    bg-sel:        @clr-surface0;
+    border-col:    @clr-surface1;
+    accent:        @clr-sky;
+    fg:            @clr-text;
+    fg-dim:        @clr-overlay0;
+
+    /* Tunable geometry — change these two values to resize rows */
+    icon-size:        100px;   /* thumbnail height (and width, square crop) */
+    element-pad-v:    10px;    /* vertical padding inside each video row    */
+    element-pad-h:    12px;    /* horizontal padding inside rows            */
+    row-spacing:      4px;     /* gap between consecutive rows              */
+
+    /* Derived: compact row height for text-only rows (status, settings…)   */
+    /* rofi calculates this automatically when icon is absent; we just need */
+    /* to keep line-height reasonable.                                      */
+    line-height:      22px;
+    compact-pad-v:    5px;
+
+    font:          "JetBrainsMono Nerd Font 10";
+
+    /* Reset rofi defaults */
     background-color: transparent;
-    text-color:       #cdd6f4;
-
-    clr-base:     #11111b;
-    clr-mantle:   #181825;
-    clr-crust:    #1e1e2e;
-    clr-surface0: #313244;
-    clr-surface1: #45475a;
-    clr-overlay0: #6c7086;
-    clr-subtext:  #a6adc8;
-    clr-text:     #cdd6f4;
-    clr-sky:      #89dceb;
-    clr-green:    #a6e3a1;
-    clr-mauve:    #cba6f7;
-    clr-red:      #f38ba8;
-    clr-peach:    #fab387;
+    text-color:       @fg;
 }
 
-/* ── Window ──────────────────────────────────────────────────────────────── */
+/* ── Window ───────────────────────────────────────────────────────────────── */
 window {
-    width:            95%;
-    height:           92%;
-    background-color: @clr-base;
+    location:         center;
+    anchor:           center;
+    width:            780px;
+    /* Height is driven by content; set a generous max so 4+ rows always fit */
+    /* If your screen is smaller than 1080p, reduce this value.              */
+    transparency:     "real";
+    background-color: @bg;
+    border:           2px solid;
+    border-color:     @border-col;
     border-radius:    12px;
-    border:           1px;
+    padding:          0px;
 }
 
-/* ── Main layout ─────────────────────────────────────────────────────────── */
+/* ── Main layout ──────────────────────────────────────────────────────────── */
 mainbox {
     background-color: transparent;
     children:         [ inputbar, message, listview ];
-    spacing:          8px;
-    padding:          12px;
+    spacing:          0px;
+    padding:          0px;
 }
 
-/* ── Search / prompt bar ─────────────────────────────────────────────────── */
+/* ── Input / prompt bar ───────────────────────────────────────────────────── */
 inputbar {
-    background-color: @clr-crust;
-    border-radius:    8px;
-    padding:          8px 14px;
-    children:         [ prompt, entry ];
-    border:           1px;
+    background-color: @bg-alt;
+    text-color:       @accent;
+    padding:          10px 14px;
+    border-radius:    10px 10px 0px 0px;
+    border:           0px 0px 1px 0px solid;
+    border-color:     @border-col;
+    children:         [ prompt, textbox-prompt-colon, entry ];
+    spacing:          6px;
 }
 
 prompt {
     background-color: transparent;
-    text-color:       @clr-sky;
-    padding:          0 10px 0 0;
-    font:             "JetBrainsMono Nerd Font Bold 11";
+    text-color:       @accent;
+    font:             "JetBrainsMono Nerd Font Bold 10";
+}
+
+textbox-prompt-colon {
+    background-color: transparent;
+    text-color:       @fg-dim;
+    str:              "›";
 }
 
 entry {
     background-color: transparent;
-    text-color:       @clr-text;
+    text-color:       @fg;
+    placeholder:      "buscar…";
+    placeholder-color: @fg-dim;
     cursor:           text;
-    placeholder:      "Buscar...";
-    placeholder-color: @clr-overlay0;
 }
 
-/* ── Message bar ─────────────────────────────────────────────────────────── */
+/* ── Message bar (settings summary / status text) ─────────────────────────── */
 message {
-    background-color: @clr-crust;
-    border-radius:    6px;
-    padding:          4px 14px;
-    border:           1px;
+    background-color: @bg-alt;
+    text-color:       @clr-subtext0;
+    padding:          4px 14px 6px 14px;
+    border:           0px 0px 1px 0px solid;
+    border-color:     @border-col;
 }
 
 textbox {
     background-color: transparent;
-    text-color:       @clr-subtext;
-    font:             "JetBrainsMono Nerd Font Medium 10";
+    text-color:       inherit;
+    font:             "JetBrainsMono Nerd Font 9";
 }
 
-/* ── List view ───────────────────────────────────────────────────────────── */
+/* ── List view ────────────────────────────────────────────────────────────── */
 listview {
     background-color: transparent;
+    padding:          8px 8px;
+    spacing:          @row-spacing;
+    scrollbar:        false;
+    /* Allow enough lines that 4 video rows + a few compact rows all show.   */
+    /* rofi-blocks sets the actual line count; this is the display cap.      */
+    lines:            5;
     columns:          1;
-    /*
-     * lines: how many rows are visible at once.
-     * Feed view rows are tall (thumbnail 160px + 3 text lines).
-     * Settings rows are compact (single text line ~20px).
-     * We set this high enough that settings is fully visible without scrolling
-     * on common screen sizes; feed naturally shows 3–4 videos.
-     * Adjust if your screen is smaller.
-     */
-    lines:            14;
-    scrollbar:        true;
-    spacing:          4px;
-    fixed-height:     true;
-    dynamic:          false;
+    fixed-height:     false;
 }
 
-/* ── Scrollbar ───────────────────────────────────────────────────────────── */
-scrollbar {
-    background-color: @clr-crust;
-    handle-color:     @clr-sky;
-    handle-width:     4px;
-    border-radius:    3px;
-    width:            6px;
-}
-
-/* ── List element ────────────────────────────────────────────────────────── */
-/*
- * Feed entries use element-icon (160px thumbnail) + element-text (3 lines).
- * Settings entries have no icon, so element-icon collapses to 0×0 and the
- * row shrinks to the height of a single text line — no extra work needed.
- * The padding below is the only shared value; it is tight enough for settings
- * rows while still feeling comfortable for feed rows.
- */
+/* ── Element (individual row) ─────────────────────────────────────────────── */
 element {
     background-color: transparent;
-    border-radius:    6px;
-    padding:          6px 8px;
-    spacing:          14px;
+    text-color:       @fg;
+    border-radius:    8px;
+    padding:          10px 12px;
+    spacing:          10px;
     orientation:      horizontal;
-    children:         [ element-icon, element-text ];
+    /* DO NOT set a fixed height here — let icon presence drive row height.  */
 }
 
-element normal normal {
-    background-color: transparent;
-}
-
-element normal active {
-    background-color: transparent;
-}
-
-element selected normal {
-    background-color: @clr-surface0;
-    border:           0px 0px 0px 3px;
-    border-color:     @clr-sky;
-    border-radius:    0px 6px 6px 0px;
-}
-
-element selected active {
-    background-color: @clr-surface0;
-    border:           0px 0px 0px 3px;
+element selected {
+    background-color: @bg-sel;
+    text-color:       @fg;
+    border:           1px solid;
     border-color:     @clr-mauve;
-    border-radius:    0px 6px 6px 0px;
 }
 
-element alternate normal {
+element normal urgent {
+    /* Used for section-header separator rows */
     background-color: transparent;
+    text-color:       @clr-surface1;
 }
 
-/* ── Thumbnail icon ──────────────────────────────────────────────────────── */
+element selected urgent {
+    background-color: @bg-sel;
+    border:           1px solid;
+    border-color:     @clr-surface1;
+}
+
+/* ── Element icon (thumbnail) ─────────────────────────────────────────────── */
 /*
- * Feed rows: rofi allocates 160×90px for the thumbnail.
- * Settings rows: no icon is set, so this widget gets size 0×0 and the text
- * fills the full row width automatically.
+ * The icon widget is only rendered when the row has an "icon" field.
+ * When absent, rofi collapses this widget to 0×0 and the row contracts.
+ * icon-size controls the displayed thumbnail square.
  */
 element-icon {
-    size:             160px;
-    border-radius:    6px;
-    cursor:           inherit;
     background-color: transparent;
+    size:             @icon-size;
+    border-radius:    4px;
+    /* vertical-align keeps the thumbnail centred within the padded row */
+    vertical-align:   0.5;
 }
 
-/* ── Entry text block ────────────────────────────────────────────────────── */
+/* ── Element text ─────────────────────────────────────────────────────────── */
 element-text {
     background-color: transparent;
-    text-color:       @clr-text;
+    text-color:       inherit;
     vertical-align:   0.5;
-    markup:           true;
-    font:             "JetBrainsMono Nerd Font Medium 11";
-    cursor:           inherit;
+    horizontal-align: 0.0;
+    /* Allow the three-line video layout to breathe */
+}
+
+/* ── Scrollbar (hidden) ───────────────────────────────────────────────────── */
+scrollbar {
+    background-color: @bg-alt;
+    handle-color:     @clr-surface1;
+    handle-width:     4px;
+    border:           0px;
+    padding:          0px 2px;
 }

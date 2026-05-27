@@ -1,0 +1,40 @@
+# ~/.config/systemd/user/rofeed-update.service
+# =============================================================================
+# rofeed — headless cache update service
+# Calls rofeed-worker.sh --crawl-only directly (bypasses the UI entirely).
+# Triggered by rofeed-update.timer or manually.
+# =============================================================================
+#
+# Installation:
+#   cp rofeed-update.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#
+# Manual one-shot run:
+#   systemctl --user start rofeed-update.service
+#
+# Check logs:
+#   journalctl --user -u rofeed-update.service -f
+#   cat ~/.cache/rofeed-feed/.crawl.log
+
+[Unit]
+Description=rofeed — headless cache update
+Documentation=https://github.com/your-user/rofeed
+
+[Service]
+Type=oneshot
+
+# ── Adjust this path to wherever you installed rofeed-worker.sh ──────────────
+# Personal installation (default):
+ExecStart=%h/.local/bin/rofeed/rofeed-worker.sh --crawl-only
+# System-wide installation (uncomment if using /usr prefix):
+# ExecStart=/usr/lib/rofeed/rofeed-worker.sh --crawl-only
+
+# Keep the service "nice" — the crawler internally uses nice -n 19 for yt-dlp
+Nice=10
+IOSchedulingClass=idle
+
+# Crawl should finish well within 30 min even for large subscription lists.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=default.target

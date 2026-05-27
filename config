@@ -1,17 +1,8 @@
 # rofeed configuration — ~/.config/rofeed/config
 # =============================================================================
 # Edit this file to customise rofeed's behaviour.
-# Changes take effect the next time rofeed opens or --update runs.
-# The UI settings panel (⚙) can also write UPDATE_INTERVAL_MIN here.
+# Changes take effect the next time rofeed opens or the crawler runs.
 # =============================================================================
-
-# ── Update interval ────────────────────────────────────────────────────────────
-# Minutes between automatic cache refreshes when the UI opens.
-# Set to 0 to always refresh on every open.
-# Minimum recommended value: 5
-# (YouTube Atom feeds are throttled server-side; polling faster than 5 min
-#  will not produce fresher results and may trigger soft rate-limits.)
-UPDATE_INTERVAL_MIN="30"
 
 # ── Cache size ─────────────────────────────────────────────────────────────────
 # Maximum number of videos to keep per channel in the local cache.
